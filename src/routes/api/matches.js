@@ -1,81 +1,170 @@
 import * as axios from "axios";
+import {parse} from 'node-html-parser';
+
+var fs = require('fs');
 
 export async function get(req, res, next) {
 
+    const {friendId = null} = req.query;
+
     const my_id = "924790347"
-    const alise_id = "32081734"
-    const red_id = "839959568"
-    const STEAM_API_KEY = "8273A998470F9C245E136B210DACCDE6"
-
-    let playerResponse;
-    let friendResponse;
-
-    try {
-
-        // playerResponse = await axios.get(`http://localhost:3000/${my_id}.json`);
-        // friendResponse = await axios.get(`http://localhost:3000/${alise_id}.json`);
-
-        playerResponse = await axios.get(`https://api.opendota.com/api/players/${my_id}/matches`);
-        friendResponse = await axios.get(`https://api.opendota.com/api/players/${alise_id}/matches`);
-
-    } catch (e) {
-        res.json({"error": e.message});
-        return;
-    }
+    // const alise_id = "32081734"
+    // const p2_id = "893728993"
+    // const red_id = "839959568"
+    // const STEAM_API_KEY = "8273A998470F9C245E136B210DACCDE6"
 
     // check base status
-    if (playerResponse.status !== 200 || friendResponse.status !== 200) {
-        res.json({"error": playerResponse.statusText})
+    if (!friendId) {
+        res.json({"error": "Friend ID is empty"})
         return;
     }
 
-    // get data
-    const playerMatchesData = playerResponse.data;
-    const friendMatchesData = friendResponse.data;
+    const myMatches = await getMatches(my_id);
+    const friendsMatches = await getMatches(friendId);
 
-    // check if some received data is empty
-    if (playerMatchesData.length === 0 || friendMatchesData.length === 0) {
-        let message = ""
-            + ((playerMatchesData.length === 0) ? "Player match data is empty" : "")
-            + ((friendMatchesData.length === 0) ? "Friend match data is empty" : "");
-
-        res.json({"error": message})
+    if (myMatches.count === 0 || friendsMatches.count === 0) {
+        res.json({"error": `My Matches: ${myMatches.count}. Friends Matches: ${friendsMatches.count}.`})
         return;
     }
 
-    // create array of player match IDs
-    const myMatchesIds = (playerMatchesData.map((item) => {
-        return {'match_id': item.match_id, "duration": item.duration}
-    }));
-
-    // create array of player match IDs
-    const friendsMatchesIds = (friendMatchesData.map((item) => {
-        return {'match_id': item.match_id, "duration": item.duration}
-    }));
+    const myMatchesIds = myMatches.matches;
+    const friendsMatchesIds = friendsMatches.matches;
 
     // find intersection between match ids of friend and player
-    const intersection = friendsMatchesIds.filter((item) => true === myMatchesIds.some((item2) => item.match_id === item2.match_id))
+    console.log(friendsMatchesIds.length, myMatchesIds.length);
 
-    // calculate total duration
+    const intersection = friendsMatchesIds.filter((item) => true === myMatchesIds.some((item2) => item.match_id === item2.match_id))
+    const sortedIntersection = intersection.sort( (a,b) =>  new Date(a.date) - new Date(b.date) )
+
+    console.log(sortedIntersection[0]);
+
     const duration = intersection.map((item) => item.duration).reduce((a, b) => a + b);
     const durationInHours = Math.floor(duration / 3600);
 
     res.json({
         count: intersection.length,
         total_duration: duration,
-        total_duration_in_hours: durationInHours,
-        match_ids: intersection
+        total_duration_in_hours: durationInHours
     });
+
 
 }
 
-async function getMatches(next) {
+async function getMatches(userId) {
 
-    let URL = `https://api.steampowered.com/IDOTA2Match_570/GetMatchHistory/V001/?key=${STEAM_API_KEY}&account_id=${my_id}`;
+    let {page, matches} = readUserFile(userId);
+    let result;
 
-    if (next) {
-        URL += `&start_at_match_id=${next}`
+    try {
+
+        console.log(`ID: ${userId} , Start Page: ${page}`)
+
+        while (page) {
+
+            const response = await axios.get(`https://www.dotabuff.com/players/${userId}/matches?enhance=overview&page=${page}`);
+
+            if (response.status !== 200) {
+                console.log(response.statusText);
+                break;
+            }
+
+
+            const root = parse(response.data);
+            const nextPage = root.querySelector(".next a");
+
+            const matchesTable = root.querySelectorAll("section table")[1];
+            const matchesIds = getMatchesIdsFromListOfNodes(matchesTable.querySelectorAll("tbody tr"));
+
+            matches.push(...matchesIds)
+
+            if (nextPage) {
+                page = nextPage.getAttribute("href").toString().match(/(?<=page=)\d+/).toString()
+            } else {
+                page = null;
+            }
+
+            await new Promise(resolve => setTimeout(resolve, 3000));
+
+        }
+
+    } catch (e) {
+        console.log(e.message, "Page: " + page)
+        // res.json({"error": e.message});
+        // return;
+    } finally {
+
+        result = {count: matches.length, "last_page": page, matches: matches};
+
+        writeUserMatchesToFile(userId, result)
+
     }
 
-    return await axios.get(URL)
+    return result;
+
+}
+
+function readUserFile(userId) {
+    const fileName = `/home/white/Projects/steam/friends-hours/static/${userId}.json`;
+
+    if (!fs.existsSync(fileName)) {
+        return {page: 1, matches: []}
+    } else {
+        const content = fs.readFileSync(fileName, "utf-8")
+        const data = JSON.parse(content);
+        return {page: data.last_page, matches: data.matches}
+    }
+
+}
+
+function writeUserMatchesToFile(userId, content) {
+
+    fs.writeFileSync(`/home/white/Projects/steam/friends-hours/static/${userId}.json`, JSON.stringify(content))
+}
+
+function getMatchesIdsFromListOfNodes(matches) {
+
+    const ids = [];
+
+    for (const match of matches) {
+        const tds = match.querySelectorAll("td");
+
+        const id = tds[1].querySelector("a").getAttribute("href").toString().match(/(?<=\/)(\d+)$/)[0]
+        const duration = durationToSeconds(tds[5].innerText);
+        const date = tds[3].querySelector("time").getAttribute("datetime").toString();
+
+        ids.push({"match_id": id, "duration": duration, "date": date})
+    }
+
+    return ids;
+
+}
+
+function getDurationFromListOfNodes(durations) {
+
+    const ids = [];
+
+    for (const duration of durations) {
+        const totalInSeconds = 0;
+        const listOfValue = durations.innerText.toString().split(":")
+
+        const hours = (listOfValue.length === 3) ? listOfValue[0] : 0;
+        const minutes = listOfValue[listOfValue.length - 2] ? listOfValue[listOfValue.length - 2] : 0;
+        const seconds = listOfValue[listOfValue.length - 1];
+
+        ids.push(+hours * 3600 + +minutes * 60 + +seconds);
+
+    }
+
+    return ids;
+
+}
+
+function durationToSeconds(duration) {
+    const listOfValue = duration.toString().split(":")
+
+    const hours = (listOfValue.length === 3) ? listOfValue[0] : 0;
+    const minutes = listOfValue[listOfValue.length - 2] ? listOfValue[listOfValue.length - 2] : 0;
+    const seconds = listOfValue[listOfValue.length - 1];
+
+    return +hours * 3600 + +minutes * 60 + +seconds;
 }

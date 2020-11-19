@@ -75,6 +75,7 @@ module.exports = {
 		},
 		mode,
 		plugins: [
+			new webpack.IgnorePlugin(/canvas|jsdom|window/, /konva/),
 			new WebpackModules()
 		],
 		performance: {

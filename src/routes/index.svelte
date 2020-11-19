@@ -3,14 +3,24 @@
 
 
     let result = null;
-    let friendId = null;
+    let selectedFriendId = 0;
+
+    const friends = [
+        {"name": "P-2", id: "893728993"},
+        {"name": "Alise2k", id: "32081734"},
+        {"name": "RedClone", id: "839959568"},
+    ]
 
     async function clickHandler() {
+
+        if (!selectedFriendId) {
+            return;
+        }
 
         let response;
 
         try {
-            response = await fetch(`/api/matches`)
+            response = await fetch(`/api/matches?friendId=${selectedFriendId}`)
         } catch (e) {
             result = e;
             return
@@ -22,7 +32,6 @@
         }
 
         result = await response.json();
-
     }
 
 </script>
@@ -67,13 +76,25 @@
 
 <h1>Happy hours with Steam friends</h1>
 
-<input type="text" />
-<button on:click={clickHandler}> click</button>
+{#each friends as friend}
+
+    <label>
+        <input type=radio bind:group={selectedFriendId} value={friend.id}>
+        {friend.name}
+    </label>
+
+{/each}
+
+<div>
+    <input type="text" bind:value={selectedFriendId}/>
+
+    <button on:click={clickHandler}> click</button>
+</div>
 
 {#if result}
     <!--  AN error  -->
     {#if typeof result === "string"}
-        <p>{result}</p>
+        <p>{@html result}</p>
     {/if}
 
     {#if typeof result === "object"}

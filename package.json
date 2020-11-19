@@ -10,13 +10,16 @@
   },
   "dependencies": {
     "compression": "^1.7.1",
+    "node-html-parser": "^2.0.0",
     "polka": "next",
     "sirv": "^1.0.0"
   },
   "devDependencies": {
     "axios": "^0.21.0",
+    "canvas": "^2.6.1",
     "express": "^4.17.1",
     "file-loader": "^6.0.0",
+    "jsdom": "^16.4.0",
     "sapper": "^0.28.0",
     "svelte": "^3.17.3",
     "svelte-loader": "^2.9.0",
